@@ -1,148 +1,86 @@
-import os
-import json
+# pages/1_탐색.py — 나이·혈당의 분포, 두 그룹 비교, 고혈압·심장병별 비율, 빈 값 살펴보기
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
-# 1. 페이지 기본 설정 (앱 제목, 아이콘, 탭 제목 설정)
-st.set_page_config(
-    page_title="뇌졸중 예측 실습실",
-    page_icon="🧠",
-    layout="wide"
-)
+st.set_page_config(page_title="탐색", page_icon="🔍", layout="wide")
+st.title("🔍 탐색")
+st.write("모델을 만들기 전에 데이터를 들여다봅니다. 화면의 값을 교재의 빈 표에 적으세요.")
 
-# 파일 경로 설정
-DATA_URL = "https://raw.githubusercontent.com/jimnny1230/data/refs/heads/main/stroke.csv"
-SAVE_DIR = "내_기록"
-SAVE_FILE = os.path.join(SAVE_DIR, "user_records.json")
+데이터주소 = "https://raw.githubusercontent.com/greatsong/modudata/main/data/stroke.csv"
 
-# 2. 저장용 폴더 및 초기 상태 설정
-if not os.path.exists(SAVE_DIR):
-    os.makedirs(SAVE_DIR, exist_ok=True)
 
-def load_user_records():
-    if os.path.exists(SAVE_FILE):
-        try:
-            with open(SAVE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {"meanings": {}, "source_text": ""}
-    return {"meanings": {}, "source_text": ""}
-
-def save_user_records(records):
-    with open(SAVE_FILE, "w", encoding="utf-8") as f:
-        json.dump(records, f, ensure_ascii=False, indent=4)
-
-# 사용자 기록 불러오기 및 세션 상태 초기화
-saved_data = load_user_records()
-if "meanings" not in st.session_state:
-    st.session_state["meanings"] = saved_data.get("meanings", {})
-if "source_text" not in st.session_state:
-    st.session_state["source_text"] = saved_data.get("source_text", "")
-
-# 3. 데이터 로드 (캐싱 처리)
 @st.cache_data
-def load_data():
-    df = pd.read_csv(DATA_URL, encoding="utf-8")
-    return df
+def 데이터_읽기():
+    return pd.read_csv(데이터주소, encoding="utf-8")
 
-df = load_data()
 
-# 4. 앱 헤더
-st.title("🧠 뇌졸중 예측 실습실")
-st.markdown("이 앱은 뇌졸중 관련 데이터를 확인하고 분석하는 실습 공간입니다. 왼쪽 사이드바에서 **탐색** 페이지로 이동할 수 있습니다.")
+df = 데이터_읽기()
+df["뇌졸중"] = df["stroke"].map({1: "뇌졸중 있음", 0: "뇌졸중 없음"})
 
-st.divider()
+st.subheader("1. 나이와 평균 혈당은 어떻게 퍼져 있는가")
+왼쪽, 오른쪽 = st.columns(2)
+with 왼쪽:
+    st.plotly_chart(px.histogram(df, x="age", nbins=40, title="나이 분포",
+                                 labels={"age": "나이", "count": "사람 수"}), width="stretch")
+with 오른쪽:
+    st.plotly_chart(px.histogram(df, x="avg_glucose_level", nbins=40, title="평균 혈당 분포",
+                                 labels={"avg_glucose_level": "평균 혈당", "count": "사람 수"}), width="stretch")
 
-# 5. 핵심 지표 (큰 숫자 카드 4개)
-total_count = len(df)
-column_count = len(df.columns)
-stroke_count = int(df["stroke"].sum())
-stroke_ratio = (stroke_count / total_count) * 100 if total_count > 0 else 0.0
+st.subheader("2. 뇌졸중을 겪은 사람과 겪지 않은 사람은 무엇이 다른가")
+왼쪽, 오른쪽 = st.columns(2)
+with 왼쪽:
+    st.plotly_chart(px.box(df, x="뇌졸중", y="age", color="뇌졸중", title="나이 비교",
+                           labels={"age": "나이"}), width="stretch")
+with 오른쪽:
+    st.plotly_chart(px.box(df, x="뇌졸중", y="avg_glucose_level", color="뇌졸중", title="평균 혈당 비교",
+                           labels={"avg_glucose_level": "평균 혈당"}), width="stretch")
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("전체 사람 수", f"{total_count:,}명")
-col2.metric("열 개수", f"{column_count}개")
-col3.metric("뇌졸중 환자 수 (stroke=1)", f"{stroke_count:,}명")
-col4.metric("뇌졸중 비율", f"{stroke_ratio:.2f}%")
+두그룹 = df.groupby("뇌졸중").agg(
+    평균_나이=("age", "mean"),
+    평균_혈당=("avg_glucose_level", "mean"),
+    고혈압_비율=("hypertension", "mean"),
+    심장병_비율=("heart_disease", "mean"),
+    사람_수=("id", "size"),
+).reset_index()
+두그룹["평균_나이"] = 두그룹["평균_나이"].round(1)
+두그룹["평균_혈당"] = 두그룹["평균_혈당"].round(1)
+두그룹["고혈압_비율"] = (두그룹["고혈압_비율"] * 100).round(1).astype(str) + "%"
+두그룹["심장병_비율"] = (두그룹["심장병_비율"] * 100).round(1).astype(str) + "%"
+st.dataframe(두그룹, width="stretch", hide_index=True)
 
-st.divider()
+st.subheader("3. 고혈압과 심장병이 있으면 뇌졸중 비율이 다른가")
 
-# 6. 데이터열 정보 메타데이터 및 교재 직접 입력 표
-st.subheader("📋 데이터 열 정보 및 정보 입력")
-st.caption("우리말 뜻 칸을 직접 채워보세요. 작성한 내용은 자동으로 저장됩니다.")
 
-# 열 정보 데이터프레임 구축
-cols_info = []
-for col in df.columns:
-    col_type = str(df[col].dtype)
-    null_count = int(df[col].isnull().sum())
-    cols_info.append({
-        "열 이름": col,
-        "값의 종류": col_type,
-        "빈 값 개수": null_count
-    })
+def 비율표(열, 이름):
+    """0과 1로 적힌 열마다 뇌졸중 비율을 구한다."""
+    표 = df.groupby(열)["stroke"].mean().reset_index()
+    표[열] = 표[열].map({1: f"{이름} 있음", 0: f"{이름} 없음"})
+    표["뇌졸중 비율(%)"] = (표["stroke"] * 100).round(2)
+    return 표.rename(columns={열: "구분"})[["구분", "뇌졸중 비율(%)"]]
 
-info_df = pd.DataFrame(cols_info)
 
-# 사용자가 입력할 '우리말 뜻' 입력 폼 구현
-updated_meanings = {}
-with st.form("meanings_form"):
-    h1, h2, h3, h4 = st.columns([2, 3, 2, 2])
-    h1.markdown("**열 이름**")
-    h2.markdown("**우리말 뜻 (직접 입력)**")
-    h3.markdown("**값의 종류**")
-    h4.markdown("**빈 값 개수**")
-    st.divider()
+왼쪽, 오른쪽 = st.columns(2)
+with 왼쪽:
+    st.plotly_chart(px.bar(비율표("hypertension", "고혈압"), x="구분", y="뇌졸중 비율(%)",
+                           title="고혈압 여부별 뇌졸중 비율", text="뇌졸중 비율(%)"), width="stretch")
+with 오른쪽:
+    st.plotly_chart(px.bar(비율표("heart_disease", "심장병"), x="구분", y="뇌졸중 비율(%)",
+                           title="심장병 여부별 뇌졸중 비율", text="뇌졸중 비율(%)"), width="stretch")
 
-    for idx, row in info_df.iterrows():
-        c1, c2, c3, c4 = st.columns([2, 3, 2, 2])
-        col_name = row["열 이름"]
-        c1.write(f"`{col_name}`")
-        
-        default_val = st.session_state["meanings"].get(col_name, "")
-        user_input = c2.text_input(
-            label=f"{col_name} 뜻",
-            value=default_val,
-            key=f"meaning_{col_name}",
-            label_visibility="collapsed"
-        )
-        updated_meanings[col_name] = user_input
-        
-        c3.write(row["값의 종류"])
-        c4.write(str(row["빈 값 개수"]))
+st.subheader("4. 체질량지수가 비어 있는 사람들은 누구인가")
+빈사람 = df[df["bmi"].isna()]
+빈값표 = pd.DataFrame({
+    "구분": ["체질량지수가 비어 있는 사람", "전체"],
+    "사람 수": [len(빈사람), len(df)],
+    "그중 뇌졸중": [int(빈사람["stroke"].sum()), int(df["stroke"].sum())],
+    "뇌졸중 비율(%)": [round(빈사람["stroke"].mean() * 100, 2), round(df["stroke"].mean() * 100, 2)],
+})
+st.dataframe(빈값표, width="stretch", hide_index=True)
+st.caption("비어 있다는 것도 데이터입니다. 이 사람들을 어떻게 할지는 다음 시간에 정합니다.")
 
-    save_meanings_btn = st.form_submit_button("우리말 뜻 저장하기")
-    if save_meanings_btn:
-        st.session_state["meanings"] = updated_meanings
-        current_records = load_user_records()
-        current_records["meanings"] = updated_meanings
-        save_user_records(current_records)
-        st.success("우리말 뜻이 '내_기록' 폴더에 저장되었습니다.")
-
-st.divider()
-
-# 7. 데이터 상위 5줄 미리보기
-st.subheader("🔍 데이터 미리보기 (처음 5줄)")
-st.dataframe(df.head(5), use_container_width=True)
-
-st.divider()
-
-# 8. 데이터 출처 작성란
-st.subheader("📌 데이터 출처")
-st.caption("교재에 있는 데이터 출처 내용을 입력해 주세요. 작성 내용은 자동 저장됩니다.")
-
-with st.form("source_form"):
-    source_input = st.text_area(
-        "출처 내용 입력",
-        value=st.session_state["source_text"],
-        height=100,
-        placeholder="교재에 있는 데이터 출처 관련 설명을 입력하세요."
-    )
-    save_source_btn = st.form_submit_button("출처 저장하기")
-    
-    if save_source_btn:
-        st.session_state["source_text"] = source_input
-        current_records = load_user_records()
-        current_records["source_text"] = source_input
-        save_user_records(current_records)
-        st.success("출처 정보가 '내_기록' 폴더에 저장되었습니다.")
+st.subheader("5. 흡연 상태에는 어떤 값이 적혀 있는가")
+흡연 = df["smoking_status"].value_counts().reset_index()
+흡연.columns = ["흡연 상태", "사람 수"]
+흡연["비율(%)"] = (흡연["사람 수"] / len(df) * 100).round(1)
+st.dataframe(흡연, width="stretch", hide_index=True)
